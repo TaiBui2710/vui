@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Điều Bất Ngờ Dành Cho Bạn</title>
+    
+    <style>
+        body, html {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            overflow: hidden; /* Quan trọng: ẩn thanh cuộn */
+            background-color: #1a1a1a;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* Vô hiệu hóa hành động mặc định của trình duyệt khi chạm */
+        }
+
+        /* Khung chứa chính */
+        .container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Canvas cho hiệu ứng vật lý */
+        #physics-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+
+        /* Lớp cào nằm trên cùng */
+        #scratch-card {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            cursor: pointer;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <canvas id="physics-canvas"></canvas>
+
+        <canvas id="scratch-card"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- PHẦN 1: THIẾT LẬP HIỆU ỨNG CÀO (TƯƠNG TỰ TRƯỚỚC) ---
+            const scratchCanvas = document.getElementById('scratch-card');
+            const scratchCtx = scratchCanvas.getContext('2d');
+            
+            scratchCanvas.width = window.innerWidth;
+            scratchCanvas.height = window.innerHeight;
+
+            const overlayImage = new Image();
+            overlayImage.src = 'https://i.imgur.com/Gah3f4H.jpeg';
+            overlayImage.crossOrigin = "anonymous";
+
+            overlayImage.onload = () => {
+                scratchCtx.drawImage(overlayImage, 0, 0, scratchCanvas.width, scratchCanvas.height);
+                scratchCtx.globalCompositeOperation = 'destination-out';
+            };
+            overlayImage.onerror = () => {
+                scratchCtx.fillStyle = '#c0c0c0';
+                scratchCtx.fillRect(0, 0, scratchCanvas.width, scratchCanvas.height);
+                scratchCtx.globalCompositeOperation = 'destination-out';
+            };
+
+            let isDrawing = false;
+            let animationTriggered = false;
+
+            function getEventPosition(e) {
+                const rect = scratchCanvas.getBoundingClientRect();
+                if (e.touches && e.touches.length > 0) {
+                    return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+                }
+                return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            }
+
+            function scratch(e) {
+                e.preventDefault();
+                if (!isDrawing) return;
+                const pos = getEventPosition(e);
+                if (pos) {
+                    scratchCtx.beginPath();
+                    scratchCtx.arc(pos.x, pos.y, 40, 0, Math.PI * 2);
+                    scratchCtx.fill();
+                }
+                if (!animationTriggered) checkClearedArea();
+            }
+
+            function checkClearedArea() {
+                const pixels = scratchCtx.getImageData(0, 0, scratchCanvas.width, scratchCanvas.height);
+                const data = pixels.data;
+                let transparentPixels = 0;
+                for (let i = 0; i < data.length; i += 800) {
+                    if (data[i + 3] < 128) transparentPixels++;
+                }
+                const clearedPercentage = (transparentPixels * 800) / data.length;
+
+                if (clearedPercentage > 0.15) { // Cào 15% là kích hoạt
+                    animationTriggered = true;
+                    runPhysicsAnimation();
+                    scratchCanvas.style.transition = 'opacity 2s';
+                    scratchCanvas.style.opacity = '0';
+                    setTimeout(() => scratchCanvas.remove(), 2000);
+                }
+            }
+
+            const startScratching = (e) => { isDrawing = true; scratch(e); };
+            const stopScratching = () => { isDrawing = false; };
+            scratchCanvas.addEventListener('mousedown', startScratching);
+            scratchCanvas.addEventListener('touchstart', startScratching, { passive: false });
+            scratchCanvas.addEventListener('mouseup', stopScratching);
+            scratchCanvas.addEventListener('touchend', stopScratching);
+            scratchCanvas.addEventListener('mousemove', scratch);
+            scratchCanvas.addEventListener('touchmove', scratch, { passive: false });
+
+
+            // --- PHẦN 2: HIỆU ỨNG VẬT LÝ VỚI MATTER.JS ---
+            function runPhysicsAnimation() {
+                // Lấy các module từ thư viện Matter
+                const { Engine, Render, Runner, World, Bodies, Mouse, MouseConstraint, Composite } = Matter;
+
+                const physicsCanvas = document.getElementById('physics-canvas');
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                physicsCanvas.width = width;
+                physicsCanvas.height = height;
+
+                // 1. Tạo "thế giới vật lý"
+                const engine = Engine.create();
+                const world = engine.world;
+                engine.world.gravity.y = 0.6; // Điều chỉnh trọng lực
+
+                // 2. Tạo "người vẽ" để hiển thị các vật thể
+                const render = Render.create({
+                    canvas: physicsCanvas,
+                    engine: engine,
+                    options: {
+                        width: width,
+                        height: height,
+                        wireframes: false, // Hiển thị vật thể có màu sắc, không phải dạng khung dây
+                        background: '#000000'
+                    }
+                });
+                Render.run(render);
+
+                // 3. Tạo "người chạy" để cập nhật thế giới liên tục
+                const runner = Runner.create();
+                Runner.run(runner, engine);
+
+                // 4. Tạo các "bức tường" vô hình xung quanh màn hình
+                const wallOptions = { isStatic: true, render: { visible: false } };
+                World.add(world, [
+                    Bodies.rectangle(width / 2, height + 30, width, 60, wallOptions), // Sàn
+                    Bodies.rectangle(width + 30, height / 2, 60, height, wallOptions), // Tường phải
+                    Bodies.rectangle(-30, height / 2, 60, height, wallOptions)  // Tường trái
+                ]);
+
+                // 5. Thả chữ và tim
+                const message = "I ❤️ YOU!";
+                const colors = ['#ff4757', '#e84393', '#f368e0', '#f19066'];
+                
+                function dropObject() {
+                    const char = message[Math.floor(Math.random() * message.length)];
+                    const x = Math.random() * width * 0.8 + width * 0.1; // Vị trí rơi ngẫu nhiên
+                    const size = char === '❤️' ? 40 : 25;
+                    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+                    const body = Bodies.rectangle(x, -50, size * 2, size * 2, {
+                        frictionAir: 0.02, // Ma sát không khí
+                        restitution: 0.5, // Độ nảy
+                        render: {
+                            sprite: {
+                                texture: createTextTexture(char, randomColor, size),
+                                xScale: 1,
+                                yScale: 1
+                            }
+                        }
+                    });
+                    World.add(world, body);
+                }
+                
+                // Hàm tạo hình ảnh từ text để làm texture cho vật thể
+                function createTextTexture(text, color, fontSize) {
+                    const canvas = document.createElement("canvas");
+                    const context = canvas.getContext("2d");
+                    const size = fontSize * 2.5;
+                    canvas.width = size;
+                    canvas.height = size;
+                    context.font = `bold ${fontSize * 2}px 'Segoe UI', sans-serif`;
+                    context.fillStyle = color;
+                    context.textAlign = "center";
+                    context.textBaseline = "middle";
+                    context.fillText(text, size / 2, size / 2);
+                    return canvas.toDataURL();
+                }
+                
+                setInterval(dropObject, 200); // Thả vật thể mới mỗi 200ms
+
+                // 6. Cho phép người dùng tương tác bằng chuột/cảm ứng
+                const mouse = Mouse.create(render.canvas);
+                const mouseConstraint = MouseConstraint.create(engine, {
+                    mouse: mouse,
+                    constraint: {
+                        stiffness: 0.2,
+                        render: {
+                            visible: false // Không hiển thị đường nối khi kéo
+                        }
+                    }
+                });
+                World.add(world, mouseConstraint);
+                render.mouse = mouse;
+            }
+        });
+    </script>
+
+</body>
+</html>
